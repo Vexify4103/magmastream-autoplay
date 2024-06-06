@@ -1,2 +1,2 @@
-import { ExamplePlugin } from "./plugin";
-export = ExamplePlugin;
+import AutoplayPlugin from './plugin';
+export default AutoplayPlugin;

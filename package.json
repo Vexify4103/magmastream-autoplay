@@ -1,7 +1,7 @@
 {
-	"name": "magmastream_plugin_template",
-	"version": "0.0.0",
-	"description": "A plugin template for Magmastream.",
+	"name": "magmastream-autoplay",
+	"version": "1.0.0",
+	"description": "A plugin for the magmastream lavalink package which enables autoplay on queueEnd",
 	"main": "dist/index.js",
 	"files": [
 		"dist"
@@ -23,8 +23,12 @@
 		"typescript": "^5.4.5"
 	},
 	"dependencies": {
+		"axios": "^1.7.2",
 		"magmastream": "^2.5.5",
 		"tslib": "^2.6.2"
+	},
+	"peerDependencies": {
+		"discord.js": ">=13.0.0 <15.0.0"
 	},
 	"engines": {
 		"node": ">=16.0.0"
