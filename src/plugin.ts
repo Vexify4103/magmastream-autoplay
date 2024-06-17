@@ -1,32 +1,23 @@
 import { ClientUser } from 'discord.js';
-import { Plugin, Manager, Player, Track, TrackEndEvent } from 'magmastream';
+import { Plugin, Manager, Player, Track, TrackEndEvent, Structure } from 'magmastream';
 import axios from 'axios';
 
-export interface AutoplayOptions {
-	SpotifyTracks: boolean;
-	spotifyID?: string;
-	spotifySECRET?: string;
-}
+const checkOptions = (options: AutoplayOptions) => {
+	if (typeof options.SpotifyTracks !== 'boolean') {
+		throw new TypeError('Invalid option: SpotifyTracks must be a boolean');
+	}
 
-export interface SpotifyTrack {
-	uri: string;
-	external_urls: {
-		spotify: string;
-	};
-	name: string;
-	artists: SpotifyArtist[];
-}
-
-export interface SpotifyArtist {
-	name: string;
-	// Add more properties as needed
-}
+	if (options.SpotifyTracks) {
+		if (!options.spotifyID || !options.spotifySECRET) {
+			throw new TypeError('SpotifyTracks is enabled but spotifyID or spotifySECRET is missing');
+		}
+	}
+};
 
 export default class AutoplayPlugin extends Plugin {
-	private readonly options: AutoplayOptions;
+	private manager: Manager;
+	private options: AutoplayOptions;
 	private autoplayEnabled: boolean = false;
-	private botUser: ClientUser | null = null;
-	private spotifyToken: string | null = null;
 	private accessToken: { token: string | null; expire: number; type: string | null } = {
 		token: null,
 		expire: 0,
@@ -35,63 +26,35 @@ export default class AutoplayPlugin extends Plugin {
 
 	constructor(options: AutoplayOptions) {
 		super();
-		this.options = options;
-		this.checkOptions();
-	}
-
-	private checkOptions() {
-		if (typeof this.options.SpotifyTracks !== 'boolean') {
-			throw new Error('Invalid option: SpotifyTracks must be a boolean');
-		}
-		if (this.options.SpotifyTracks) {
-			if (!this.options.spotifyID || !this.options.spotifySECRET) {
-				throw new Error('SpotifyTracks is enabled but spotifyID or spotifySECRET is missing');
-			}
-		}
+		this.options = { ...options };
 	}
 
 	load(manager: Manager) {
-		console.log('Autoplay plugin loaded with options:', this.options);
+		checkOptions(this.options);
+		this.manager = manager;
+		this.manager.on('queueEnd', this.onQueueEnd.bind(this));
 
-		manager.on('queueEnd', (player: Player, track: Track, payload: TrackEndEvent) => {
-			this.queueEnd(player, track, payload);
-		});
-	}
+		Structure.extend(
+			'Player',
+			(Player) =>
+				class extends Player {
+					public autoplayEnabled: boolean = false;
 
-	setAutoplay(autoplayState: boolean, botUser: ClientUser) {
-		if (typeof autoplayState !== 'boolean') {
-			throw new TypeError('autoplayState must be a boolean.');
-		}
+					/** Sets the autoplay-state of the player. */
+					public setAutoplay(autoplayState: boolean, botUser: ClientUser) {
+						if (typeof autoplayState !== 'boolean') {
+							throw new TypeError('autoplayState must be a boolean.');
+						}
 
-		if (!(botUser instanceof ClientUser)) {
-			throw new TypeError('botUser must be a ClientUser object.');
-		}
+						if (!(botUser instanceof ClientUser)) {
+							throw new TypeError('botUser must be a ClientUser object.');
+						}
 
-		this.autoplayEnabled = autoplayState;
-		this.botUser = botUser;
-
-		if (this.options.SpotifyTracks) {
-			this.authenticateSpotify();
-		}
-	}
-
-	private async authenticateSpotify() {
-		const { spotifyID, spotifySECRET } = this.options;
-		const authString = Buffer.from(`${spotifyID}:${spotifySECRET}`).toString('base64');
-
-		try {
-			const response = await axios.post('https://accounts.spotify.com/api/token', 'grant_type=client_credentials', {
-				headers: {
-					Authorization: `Basic ${authString}`,
-					'Content-Type': 'application/x-www-form-urlencoded',
-				},
-			});
-
-			this.spotifyToken = response.data.access_token;
-			console.log('Spotify authenticated successfully');
-		} catch (error) {
-			console.error('Failed to authenticate with Spotify', error);
-		}
+						this.autoplayEnabled = autoplayState;
+						return this;
+					}
+				}
+		);
 	}
 
 	private async handleAutoplay(player: Player, track: Track) {
@@ -108,9 +71,6 @@ export default class AutoplayPlugin extends Plugin {
 			if (recommendations && recommendations.length > 0) {
 				const foundTrack = recommendations.find((recTrack: SpotifyTrack) => recTrack.uri !== track.uri);
 
-				console.log('-----');
-				console.log(foundTrack);
-
 				if (foundTrack) {
 					player.queue.add(foundTrack);
 					player.play();
@@ -126,7 +86,7 @@ export default class AutoplayPlugin extends Plugin {
 		if (!hasYouTubeURL) {
 			const res = await player.search(`${previousTrack.author} - ${previousTrack.title}`);
 
-			videoID = res.tracks[0].uri.substring(res.tracks[0].uri.indexOf('=' + 1));
+			videoID = res.tracks[0].uri.substring(res.tracks[0].uri.indexOf('=') + 1);
 		} else {
 			videoID = previousTrack.uri.substring(previousTrack.uri.indexOf('=') + 1);
 		}
@@ -174,11 +134,10 @@ export default class AutoplayPlugin extends Plugin {
 				},
 			});
 
-			console.log(response.data.tracks);
 			return response.data.tracks.map((track: SpotifyTrack) => ({
 				uri: track.external_urls.spotify,
 				title: track.name,
-				author: track.artists.map((artist: SpotifyTrack) => artist.name).join(', '),
+				author: track.artists.map((artist: SpotifyArtist) => artist.name).join(', '),
 			}));
 		} catch (error) {
 			console.error('Failed to fetch Spotify recommendations', error);
@@ -217,7 +176,7 @@ export default class AutoplayPlugin extends Plugin {
 		});
 	}
 
-	protected async queueEnd(player: Player, track: Track, payload: TrackEndEvent): Promise<void> {
+	private async onQueueEnd(player: Player, track: Track, payload: TrackEndEvent): Promise<void> {
 		player.queue.previous = player.queue.current;
 		player.queue.current = null;
 
@@ -231,4 +190,23 @@ export default class AutoplayPlugin extends Plugin {
 
 		await this.handleAutoplay(player, track);
 	}
+}
+
+export interface AutoplayOptions {
+	SpotifyTracks: boolean;
+	spotifyID?: string;
+	spotifySECRET?: string;
+}
+
+export interface SpotifyTrack {
+	uri: string;
+	external_urls: {
+		spotify: string;
+	};
+	name: string;
+	artists: SpotifyArtist[];
+}
+
+export interface SpotifyArtist {
+	name: string;
 }
